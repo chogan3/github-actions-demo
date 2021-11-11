@@ -11,7 +11,7 @@ describe('src/handlers/hello-world', () => {
       it('should return 200 / hello world', async () => {
         await expect(handler(event)).resolves.toMatchObject({
           statusCode: 200,
-          body: JSON.stringify({ message: 'hello world' }),
+          body: JSON.stringify({ message: 'Hello world!' }),
         });
       });
     });
