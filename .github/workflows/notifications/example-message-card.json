@@ -1,0 +1,35 @@
+{
+  "@type": "MessageCard",
+  "@context": "https://schema.org/extensions",
+  "themeColor": "0078D7",
+  "title": "New pull request from ${{ github.actor }}",
+  "text": "${{ github.repository }} - ${{ github.base_ref }} <- ${{ github.head_ref }}",
+  "sections": [
+    {
+      "activityTitle": "${{ github.event.pull_request.title }}",
+      "text": "${{ github.event.pull_request.body }}"
+    }
+  ],
+  "potentialAction": [
+    {
+      "@type": "OpenUri",
+      "name": "Pull Request",
+      "targets": [
+        {
+          "os": "default",
+          "uri": "${{ github.event.pull_request.html_url }}"
+        }
+      ]
+    },
+    {
+      "@type": "OpenUri",
+      "name": "${{ github.workflow }} Workflow",
+      "targets": [
+        {
+          "os": "default",
+          "uri": "${{ github.event.repository.html_url }}/actions/runs/${{ github.run_id }}"
+        }
+      ]
+    }
+  ]
+}

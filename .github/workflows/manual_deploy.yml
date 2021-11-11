@@ -1,0 +1,113 @@
+# Configuring and Managing Workflows
+# https://help.github.com/en/actions/configuring-and-managing-workflows
+
+# Migrating from CircleCI to GitHub Actions
+# https://help.github.com/en/actions/migrating-to-github-actions/migrating-from-circleci-to-github-actions
+
+name: Manual Deploy
+env:
+  AWS_REGION: us-east-2
+  NODE_VERSION: '14'
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Deployment Stage (test, beta, or prod)
+        required: true
+        default: test
+      use-cache:
+        description: Use dependencies cache (true or false)
+        required: true
+        default: true
+
+jobs:
+  serverlessDeploy:
+    name: Serverless Deploy
+
+    runs-on: [ubuntu-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v2-beta
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # For troubleshooting if needed
+      - name: Output event and runner contexts
+        env:
+          EVENT_CONTEXT: ${{ toJson(github.event) }}
+          RUNNER_CONTEXT: ${{ toJson(runner) }}
+        run: |
+          echo "$EVENT_CONTEXT"
+          echo "$RUNNER_CONTEXT"
+
+      - name: Configure PROD AWS credentials - if stage = prod
+        if: github.event.inputs.stage == 'prod'
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.PROD_AWS_ACCESS_KEY_ID }} # TODO: Add PROD AWS credentials to your repo's secrets
+          aws-secret-access-key: ${{ secrets.PROD_AWS_SECRET_ACCESS_KEY }} # TODO: Add PROD AWS credentials to your repo's secrets
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure NONPROD AWS credentials - if stage = test || beta
+        if: github.event.inputs.stage == 'test' || github.event.inputs.stage == 'beta'
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.NONPROD_AWS_ACCESS_KEY_ID }} # TODO: Add NONPROD AWS credentials to your repo's secrets
+          aws-secret-access-key: ${{ secrets.NONPROD_AWS_SECRET_ACCESS_KEY }} # TODO: Add NONPROD AWS credentials to your repo's secrets
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Test AWS credentials
+        if: success()
+        run: aws s3 ls
+
+      - name: Get yarn cache directory path
+        if: github.event.inputs.use-cache == 'true'
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+
+      - name: Cache/restore dependencies
+        if: github.event.inputs.use-cache == 'true'
+        uses: actions/cache@v2
+        id: yarn-deploy-cache
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-deploy-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-deploy-
+
+      - name: Install dependencies
+        if: github.event.inputs.use-cache != 'true' || steps.yarn-cache.outputs.cache-hit != 'true'
+        run: yarn install
+
+      - name: Serverless Framework version
+        run: yarn sls --version
+
+      - name: Deploy
+        run: yarn sls deploy --stage=${{ github.event.inputs.stage }} --conceal
+
+      # Getting your webhook uri: https://docs.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/connectors-using#setting-up-a-custom-incoming-webhook
+      # More info on message cards: https://docs.microsoft.com/en-us/outlook/actionable-messages/message-card-reference
+      # TODO: Add your Teams channel webhook uri to your repo's secrets if you want workflow notifications in teams (or remove this step entirely)
+      - name: Send success message to MS Teams
+        if: success()
+        run: |
+          cat .github/workflows/notifications/deployment-success.json | \
+            curl -H 'Content-Type: application/json' \
+            -d '{"@type":"MessageCard","@context":"https://schema.org/extensions","themeColor":"00b300","title":"Deploy to ${{ github.event.inputs.stage }} from ${{ github.actor }}","text":"${{ github.repository }} - ${{ github.ref }} - ${{ github.sha }}","sections":[{"activityTitle":"SUCCESS"}],"potentialAction":[{"@type":"OpenUri","name":"Repository","targets":[{"os":"default","uri":"${{ github.event.repository.html_url }}"}]},{"@type":"OpenUri","name":"${{ github.workflow }} Workflow","targets":[{"os":"default","uri":"${{ github.event.repository.html_url }}/actions/runs/${{ github.run_id }}"}]}]}' \
+            ${{ secrets.MSTEAMS_WEBHOOK_URI }}
+
+      # Getting your webhook uri: https://docs.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/connectors-using#setting-up-a-custom-incoming-webhook
+      # More info on message cards: https://docs.microsoft.com/en-us/outlook/actionable-messages/message-card-reference
+      # TODO: Add your Teams channel webhook uri to your repo's secrets if you want workflow notifications in teams (or remove this step entirely)
+      - name: Send failure message to MS Teams
+        if: failure()
+        run: |
+          cat .github/workflows/notifications/deployment-failure.json | \
+            curl -H 'Content-Type: application/json' \
+            -d '{"@type":"MessageCard","@context":"https://schema.org/extensions","themeColor":"b30000","title":"Deploy to ${{ github.event.inputs.stage }} from ${{ github.actor }}","text":"${{ github.repository }} - ${{ github.ref }} - ${{ github.sha }}","sections":[{"activityTitle":"FAILURE"}],"potentialAction":[{"@type":"OpenUri","name":"Repository","targets":[{"os":"default","uri":"${{ github.event.repository.html_url }}"}]},{"@type":"OpenUri","name":"${{ github.workflow }} Workflow","targets":[{"os":"default","uri":"${{ github.event.repository.html_url }}/actions/runs/${{ github.run_id }}"}]}]}' \
+            ${{ secrets.MSTEAMS_WEBHOOK_URI }}

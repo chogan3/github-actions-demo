@@ -1,0 +1,77 @@
+# This workflow will do a clean install of node dependencies, build the source code and run tests
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-nodejs-with-github-actions
+
+name: CI
+env:
+  NODE_VERSION: '14'
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: [ubuntu-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v2-beta
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # For troubleshooting if needed
+      - name: Output event and runner contexts
+        env:
+          EVENT_CONTEXT: ${{ toJson(github.event) }}
+          RUNNER_CONTEXT: ${{ toJson(runner) }}
+        run: |
+          echo "$EVENT_CONTEXT"
+          echo "$RUNNER_CONTEXT"
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+
+      - name: Cache/restore dependencies
+        uses: actions/cache@v2
+        id: yarn-ci-cache
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-ci-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-ci-
+
+      - name: Install dependencies
+        if: steps.yarn-cache.outputs.cache-hit != 'true'
+        run: yarn install
+
+      - name: Lint
+        run: yarn lint --no-fix
+
+      - name: Unit tests
+        run: yarn test:coverage
+
+      # - name: Sonar
+      #   env:
+      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # TODO: Add your Sonar token to your repo's secrets
+      #     BRANCH_NAME: ${{ github.head_ref }}
+      #   run: |
+      #     PACKAGE_VERSION=$(cat package.json | jq .version --raw-output)
+      #     echo "PACKAGE_VERSION=${PACKAGE_VERSION}"
+      #     yarn sonar-scanner -Dsonar.login=${SONAR_TOKEN} -Dsonar.projectVersion=${PACKAGE_VERSION} -Dsonar.branch.name=${BRANCH_NAME}
+
+      # Getting your webhook uri: https://docs.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/connectors-using#setting-up-a-custom-incoming-webhook
+      # More info on message cards: https://docs.microsoft.com/en-us/outlook/actionable-messages/message-card-reference
+      # View this example message card at .github/workflows/notifications/example-message-card.json
+      # TODO: Add your Teams channel webhook uri to your repo's secrets if you want workflow notifications in teams (or remove this step entirely)
+      - name: Send message to MS Teams
+        if: success() && github.ref != 'refs/heads/master'
+        run: |
+          curl -H 'Content-Type: application/json' \
+            -d '{"@type":"MessageCard","@context":"https://schema.org/extensions","themeColor":"0078D7","title":"New pull request from ${{ github.actor }}","text":"${{ github.repository }} - ${{ github.base_ref }} <- ${{ github.head_ref }}","sections":[{"activityTitle":"${{ github.event.pull_request.title }}","text":"${{ github.event.pull_request.body }}"}],"potentialAction":[{"@type":"OpenUri","name":"Pull Request","targets":[{"os":"default","uri":"${{ github.event.pull_request.html_url }}"}]},{"@type":"OpenUri","name":"${{ github.workflow }} Workflow","targets":[{"os":"default","uri":"${{ github.event.repository.html_url }}/actions/runs/${{ github.run_id }}"}]}]}' \
+            ${{ secrets.MSTEAMS_WEBHOOK_URI }}
