@@ -15,7 +15,7 @@ export const handler = async (
     return {
       isBase64Encoded: false,
       statusCode: 200,
-      body: JSON.stringify({ message: 'hello world' }),
+      body: JSON.stringify({ message: 'Hello world!' }),
     };
   } catch (err) {
     // Despite catching an error, we still return 'successfully' but with statusCode 500 (an error code)
